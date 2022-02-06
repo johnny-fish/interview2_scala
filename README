@@ -1,3 +1,5 @@
+Build a simple application that we can run to compute the top 25 pages on Wikipedia for each of the Wikipedia sub-domains.
+
 Scala version = 2.13.1
 jdk version = 1.8
 sbt projet
