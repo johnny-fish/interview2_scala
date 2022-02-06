@@ -1,0 +1,117 @@
+Scala version = 2.13.1
+jdk version = 1.8
+sbt projet
+
+
+The program have a structure of 3 major component:
+
+*dataManager.RawDataManager:
+    -have responsibility to manage all raw data (blacklist, hours record)the download, store, read, parse the file...
+    -the default location is /tmp with directory named datadogCache
+     we can change /tmp with the parameter of the application
+
+*dataManager.result.ResultDataManager:
+    **include LocalResultManager
+        -on local, have responsibility to manage the result data such save result in CSV format, read result if it was
+         processing at passe
+        -the default location is /tmp with directory named datadogCache
+         we can change /tmp with the parameter of the application
+    **include S3ResultManager
+        -on amazon S3, to upload, download.. the result
+         I comment this part of code because it depend on "com.amazonaws aws-java-sdk" library and it hav >100mb
+         and i want to send a uber-jar for submit
+    **compute.ResultDataOps
+        -all the intermediate calculation to compute from the raw data -> filter with blacklist -> group with other
+         hours record
+
+*dataManager.PageTitleCache:
+    -Because wikipedia have 49,934,696 pages. it will use to many memory if we save all page title
+     So I create disk cache how can save all page title with unique id
+     during computation, page title will represented by id with type of int, to use less memory
+     At the end, with one pass, replace id in the result by page title string
+     Cache file have a size of 900Mb
+
+
+For each hour of raw data compressed, the size is ~60Mb. Once decompressed is ~230Mb.
+So in my treatment, to save memory, i was reading directly with GZInputStream.
+And i load raw data and compute hour by hour to not load to much and explode the memory
+But the application need a lot of memory, option -Xmx is required like -Xmx8g to process 24 hours data
+
+To save memory what i done is:
+1.Cache the page title string
+2.Process one hour raw data at the time
+3.use iterator during the proceess of hour raw data, so in that way load one line at time in memory
+4.not use String.split or regex operation because it will alloc array of char = use more memory
+
+Process 24 hours data need 8g of memory, and slowly using more memory because we converge to 49,934,696 pages at the end
+
+I join with submit a uber-jar(6.4Mb) and the result(1.3Mb) for the request 19h at 2020/03/01 and hour=24
+You can open the result file and search "coronavirus" to validate the result.
+And at the end of README, i past the command and the output to compute this result.
+
+Answer for the question:
+1.Be capable of being run for a range of dates and hours; each hour within the range should have its own result file
+give on command line the option: --request "2020/03/01/19:24" "2020/02/10/11:10" "2019/02/10/11:10"
+the result file for each request have request on the file name
+
+2.What additional things would you want to operate this application in a production setting?
+-Because of time, there no unit Unit test, even i include mockito and scala test library.
+ So add test test test.
+-Need to integrate configuration file and for each of environment.
+-Pipline of CI/CD
+-logging more log
+
+3.What might change about your solution if this application needed to run automatically for each hour of the day?
+-Define which Scheduling system to use, add configuration
+-save log file on disk= error info warn...
+-monitoring the application
+
+4.How would you test this application?
+-Unit test, side case
+-Performance test
+-memory leak, number of thread, stability
+
+5.How you’d improve on this application design?
+-Parallelize the process for each request
+ => if we have many server, distribute the computation
+-use containerization
+-pre-process data and partition
+-use more complex data structure for more lite memory pressure
+
+
+
+java -Xmx8g -jar XXXXHomeWork-assembly-0.1.jar --requests "2020/03/01/19:24"
+
+Scallop(--requests, 2020/03/01/19:24)
+    redownload => false
+    rerun => false
+    writemode => Local
+ *  requests => List(2020/03/01/19:24)
+    storepath => /tmp
+
+(Request,2020/03/01/19,24)
+20/03/26 19:00:18 INFO MainApp$: Compute for the request Sun Mar 01 19:00:00 CET 2020 and hour 24
+20/03/26 19:00:18 INFO ResultDataOps$: **Process data for date:Sun Mar 01 19:00:00 CET 2020
+20/03/26 19:00:18 INFO RawDataManager: Get black list
+20/03/26 19:00:18 INFO RawDataManager: Parsing raw black list
+20/03/26 19:00:18 WARN RawDataManager: Can not parse line:bn.m.v
+20/03/26 19:00:19 INFO RawDataManager: Get raw data for date Sun Mar 01 19:00:00 CET 2020
+20/03/26 19:00:34 INFO ResultDataOps$: **Process data for date:Sun Mar 01 18:00:00 CET 2020
+20/03/26 19:00:34 INFO RawDataManager: Get black list
+20/03/26 19:00:34 INFO RawDataManager: Get raw data for date Sun Mar 01 18:00:00 CET 2020
+....
+20/03/26 19:02:44 INFO ResultDataOps$: **Process data for date:Sun Mar 01 09:00:00 CET 2020
+20/03/26 19:02:44 INFO RawDataManager: Get black list
+20/03/26 19:02:44 INFO RawDataManager: Get raw data for date Sun Mar 01 09:00:00 CET 2020
+20/03/26 19:02:56 WARN ResultDataOps$: Can not parse the line:zh.m.s 書畫彚考_(四庫全書本)/卷46
+20/03/26 19:02:56 WARN ResultDataOps$: Can not parse the line: 1 0
+20/03/26 19:02:56 INFO ResultDataOps$: **Process data for date:Sun Mar 01 08:00:00 CET 2020
+...
+20/03/26 19:08:07 INFO ResultDataOps$: **Process data for date:Sat Feb 29 20:00:00 CET 2020
+20/03/26 19:08:07 INFO RawDataManager: Get black list
+20/03/26 19:08:07 INFO RawDataManager: Get raw data for date Sat Feb 29 20:00:00 CET 2020
+20/03/26 19:09:20 INFO ResultDataOps$: Parsing final result to ResultData
+20/03/26 19:10:00 INFO LocalResultManager: Write result for Sun Mar 01 19:00:00 CET 2020 and hour 24
+20/03/26 19:10:00 INFO MainApp$: End for for the request Sun Mar 01 19:00:00 CET 2020 and hour 24
+20/03/26 19:10:00 INFO MainApp$: -------------------------------------------------------------------------
+20/03/26 19:10:00 INFO MainApp$: There no print because too long for the result for the request Sun Mar 01 19:00:00 CET 2020 and hour 24, go to check in the /tmp
